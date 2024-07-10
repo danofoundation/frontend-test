@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login with metamask</title>
+    <script
+      src="https://code.jquery.com/jquery-3.6.0.min.js"
+      integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+      crossorigin="anonymous"
+    ></script>
+    <script src="https://unpkg.com/@metamask/detect-provider/dist/detect-provider.min.js"></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/web3/1.7.3/web3.min.js"
+      integrity="sha512-Ws+qbaGHSFw2Zc1e7XRpvW+kySrhmPLFYTyQ95mxAkss0sshj6ObdNP3HDWcwTs8zBJ60KpynKZywk0R8tG1GA=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+  </head>
+  <body>
+    <h1>Login with metamask</h1>
+    <div>
+      <a id="connect">Connect</a>
+      
+    </div>
+  </body>
+</html>
+<script>
+  jQuery.noConflict();
+
+  jQuery(document).ready(function($) {
+    const connectText = $("#connect");
+    let isConnected = false;
+
+    const toggleConnectDisconnect = async () => {
+        if (isConnected) {
+            await disconnect();
+            isConnected = false;
+            connectText.text("Connect");
+        } else {
+            await connectMetaMask();
+            if (isConnected) {
+                connectText.text("Disconnect");
+            } else {
+                connectText.text("Connect");
+            }
+        }
+    };
+
+    connectText.on("click", toggleConnectDisconnect);
+
+    const connectMetaMask = async () => {
+      try {
+        connectText.text("Connecting...");
+  
+        // 1 - Connect MetaMask with the frontend
+        const provider = await detectEthereumProvider();
+        if (!provider) {
+          alert("Please install MetaMask");
+          throw new Error("MetaMask is not installed!");
+        }
+        
+        await provider.request({ method: 'eth_requestAccounts' });
+  
+        // 2 - Get the wallet address from MetaMask
+        const web3 = new Web3(provider);
+        const walletAddress = await web3.eth.getCoinbase();
+        if (!walletAddress) {
+          throw new Error("Wallet address not found in MetaMask");
+        }
+  
+        // 3 - Send the wallet address to the server to get a nonce
+        const response1 = await fetch(`/nonce?walletAddress=${walletAddress}`);
+        if (!response1.ok) {
+          throw new Error(`Error fetching nonce: ${response1.statusText}`);
+        }
+        const { nonce } = await response1.json();
+  
+        // 4 - Sign the nonce with MetaMask
+        const signedNonce = await web3.eth.personal.sign(nonce, walletAddress);
+  
+        // 5 - Send the signed nonce to the server for verification
+        const response2 = await fetch(
+          `/verify?walletAddress=${walletAddress}&signedNonce=${signedNonce}`
+        );
+        if (!response2.ok) {
+          throw new Error(`Error verifying signature: ${response2.statusText}`);
+        }
+        const { success } = await response2.json();
+  
+        if (success) {
+          console.log("Connect successful!");
+          isConnected = true;
+          await checkSession();
+        } else {
+          throw new Error("Connect failed");
+        }
+      } catch (error) {
+        if (error.code === 4001) {
+          console.error("User rejected the request:", error);
+        } else {
+          console.error("Error during MetaMask connection and login:", error);
+        }
+        connectText.text("Connect");
+        isConnected = false;
+      }
+    };
+    
+    const disconnect = async () => {
+      try {
+        const response = await fetch("/disconnect");
+        if (!response.ok) {
+          throw new Error(`Error disconnecting: ${response.statusText}`);
+        }
+        console.log("Disconnected successfully");
+        connectText.text("Connect");
+        isConnected = false;
+      } catch (error) {
+        console.error("Error during disconnect:", error);
+      }
+    };
+    
+    const checkSession = async () => {
+      try {
+        console.log("Checking session...");
+        const response = await fetch("/check");
+        if (!response.ok) {
+          throw new Error(`Error checking session: ${response.statusText}`);
+        }
+  
+        const data = await response.json();
+        const { success, walletAddress } = data;
+        
+        if (success) {
+          connectText.text('Disconnect');
+          isConnected = true;
+        } else {
+          connectText.text("Connect");
+          isConnected = false;
+        }
+      } catch (error) {
+        console.error("Error checking session:", error);
+        connectText.text("Connect");
+        isConnected = false;
+      }
+    };
+    
+    (async () => {
+      try {
+        await checkSession();
+      } catch (error) {
+        console.error("Error during session check:", error);
+      }
+    })();
+  });
+</script>
+
